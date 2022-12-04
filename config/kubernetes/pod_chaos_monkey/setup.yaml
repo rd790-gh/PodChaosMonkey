@@ -1,0 +1,70 @@
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: pod-chaos-monkey-sa
+  namespace: workloads
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: pod-chaos-monkey-role
+  namespace: workloads
+rules:
+  - apiGroups: [""] # "" indicates the core API group
+    resources: ["pods", "configmaps"]
+    verbs: ["get", "list", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: pod-chaos-monkey-rb
+  namespace: workloads
+subjects:
+  - kind: ServiceAccount
+    name: pod-chaos-monkey-sa
+    namespace: workloads
+roleRef:
+  kind: Role
+  name: pod-chaos-monkey-role
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: exempt-labels-cm
+  namespace: workloads
+data:
+  nochaos: nochaos
+  app: busybox
+---
+apiVersion: batch/v1beta1 # batch/v1 for 1.21+
+kind: CronJob
+metadata:
+  name: pod-chaos-monkey
+  namespace: workloads
+spec:
+  schedule: "*/5 * * * *"
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            app: pod-chaos-monkey
+            nochaos: nochaos
+        spec:
+          containers:
+            - name: pod-chaos-monkey
+              image: rd790/projects:latest
+              imagePullPolicy: Always
+              env:
+                - name: MY_POD_NAMESPACE
+                  valueFrom:
+                    fieldRef:
+                      fieldPath: metadata.namespace # Downward API
+                - name: EXEMPT_LABELS
+                  value: exempt-labels-cm
+          serviceAccountName: pod-chaos-monkey-sa
+          imagePullSecrets:
+            - name: dhregcred # docker hub creds, check readme
+          restartPolicy: Never
